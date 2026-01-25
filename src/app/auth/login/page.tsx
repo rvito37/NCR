@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signIn } from '@/lib/api';
+import { signIn, getCurrentUser } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/FormElements';
@@ -29,6 +29,10 @@ export default function LoginPage() {
         setError(authError.message);
         return;
       }
+
+      // Получаем данные пользователя и сохраняем в store
+      const currentUser = await getCurrentUser();
+      setUser(currentUser);
 
       router.push('/dashboard');
     } catch (err) {
