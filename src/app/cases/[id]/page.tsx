@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useCaseStore } from '@/lib/store';
 import {
@@ -18,8 +18,9 @@ import Link from 'next/link';
 import { Button } from '@/components/Button';
 import { Textarea } from '@/components/FormElements';
 
-export default function CaseDetailPage({ params }: { params: { id: string } }) {
+export default function CaseDetailPage() {
   const router = useRouter();
+  const params = useParams<{ id: string }>();
   const { user, isLoading, isAuthenticated } = useAuth();
   const { cases } = useCaseStore();
   const [caseData, setCaseData] = useState<any>(null);
