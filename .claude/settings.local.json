@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx next dev --turbopack=false)",
+      "Bash(npx next dev:*)",
+      "Bash(findstr:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix login redirect loop and add Turbopack config\n\n- Fix authentication flow: fetch and store user data after successful\n  login before redirecting to dashboard\n- Add Turbopack configuration placeholder for Windows compatibility\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}
