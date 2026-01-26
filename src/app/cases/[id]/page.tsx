@@ -246,7 +246,7 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
                     <select
                       value={caseData.status_id}
                       onChange={(e) => handleStatusChange(e.target.value)}
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-black"
                     >
                       {statuses.map((status) => (
                         <option key={status.id} value={status.id}>
@@ -269,7 +269,7 @@ export default function CaseDetailPage({ params }: { params: { id: string } }) {
                       onChange={(e) =>
                         handleAssignChange(e.target.value || null)
                       }
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-black"
                     >
                       <option value="">Unassigned</option>
                       {users.map((u) => (
