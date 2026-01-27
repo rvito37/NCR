@@ -3,10 +3,10 @@
 import { createContext, useContext, useEffect, ReactNode } from 'react';
 import { getCurrentUser, signOut as supabaseSignOut } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
-import { AuthUser } from '@/lib/types';
+import { User } from '@/lib/types';
 
 interface AuthContextType {
-  user: AuthUser | null;
+  user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   signOut: () => Promise<void>;

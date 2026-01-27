@@ -24,7 +24,7 @@ export default function Home() {
           NCR Jerusalem System
         </h1>
         <p className="text-xl md:text-2xl mb-8 text-blue-100">
-          Streamline your case handling with role-based access control, real-time collaboration, and comprehensive tracking.
+          Non-Conformance Report management system with workflow automation, role-based approvals, and complete audit trail.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <Button
@@ -45,16 +45,16 @@ export default function Home() {
         
         <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6">
-            <h3 className="text-xl font-bold mb-2">Secure</h3>
-            <p className="text-blue-100">Enterprise-grade security with role-based access control</p>
+            <h3 className="text-xl font-bold mb-2">Workflow</h3>
+            <p className="text-blue-100">Automated routing through PE, EM, PM, OM, QA approval chain</p>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6">
-            <h3 className="text-xl font-bold mb-2">Collaborative</h3>
-            <p className="text-blue-100">Real-time updates and comments for team coordination</p>
+            <h3 className="text-xl font-bold mb-2">Role-Based</h3>
+            <p className="text-blue-100">Each role sees only relevant NCRs and available actions</p>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6">
-            <h3 className="text-xl font-bold mb-2">Trackable</h3>
-            <p className="text-blue-100">Complete audit trail of all case activities</p>
+            <h3 className="text-xl font-bold mb-2">Traceable</h3>
+            <p className="text-blue-100">Complete history of decisions, comments, and transitions</p>
           </div>
         </div>
       </div>

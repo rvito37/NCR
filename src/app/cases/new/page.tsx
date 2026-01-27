@@ -3,29 +3,20 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import {
-  createCase,
-  getCaseStatuses,
-  getDefaultStatus,
-  getAllUsers,
-} from '@/lib/api';
+import { createNCR, canCreateNCR } from '@/lib/api';
+import { Priority } from '@/lib/types';
 import Link from 'next/link';
 import { Button } from '@/components/Button';
 import { Input, Select, Textarea } from '@/components/FormElements';
 
-export default function NewCasePage() {
+export default function NewNCRPage() {
   const router = useRouter();
   const { user, isLoading, isAuthenticated } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState('medium');
-  const [statusId, setStatusId] = useState('');
-  const [assignedTo, setAssignedTo] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [priority, setPriority] = useState<Priority>('medium');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [statuses, setStatuses] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -33,30 +24,11 @@ export default function NewCasePage() {
       return;
     }
 
-    const loadData = async () => {
-      try {
-        const [caseStatuses, allUsers, defaultStatus] = await Promise.all([
-          getCaseStatuses(),
-          getAllUsers(),
-          getDefaultStatus(),
-        ]);
-
-        setStatuses(caseStatuses);
-        setUsers(allUsers);
-        if (defaultStatus) {
-          setStatusId(defaultStatus.id);
-        }
-      } catch (err) {
-        console.error('Failed to load data:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (isAuthenticated) {
-      loadData();
+    if (!isLoading && user && !canCreateNCR(user.role)) {
+      router.push('/dashboard');
+      return;
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, router, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,21 +41,14 @@ export default function NewCasePage() {
       return;
     }
 
-    if (!statusId) {
-      setError('Status is required');
-      return;
-    }
-
     setSubmitting(true);
 
     try {
-      const { data, error: apiError } = await createCase(
+      const { data, error: apiError } = await createNCR(
         title,
         description,
-        priority as 'low' | 'medium' | 'high' | 'critical',
-        statusId,
-        user.id,
-        assignedTo || undefined
+        priority,
+        user.id
       );
 
       if (apiError) {
@@ -101,17 +66,20 @@ export default function NewCasePage() {
     }
   };
 
-  if (isLoading || loading) return null;
+  if (isLoading || !user) return null;
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
         <Link href="/cases" className="text-blue-600 hover:text-blue-700 mb-4 inline-block">
-          ← Back to Cases
+          &larr; Back to NCRs
         </Link>
 
         <div className="bg-white rounded-lg shadow p-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-6">Create New Case</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Create New NCR</h1>
+          <p className="text-gray-600 mb-6">
+            Create a Non-Conformance Report. After creation, you can submit it for review.
+          </p>
 
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -121,13 +89,13 @@ export default function NewCasePage() {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <Input
-              label="Case Title"
+              label="NCR Title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
               disabled={submitting}
-              placeholder="Enter case title"
+              placeholder="Brief description of the non-conformance"
             />
 
             <Textarea
@@ -135,46 +103,32 @@ export default function NewCasePage() {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               disabled={submitting}
-              placeholder="Enter case description"
-              rows={4}
+              placeholder="Detailed description of the non-conformance issue..."
+              rows={6}
             />
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select
-                label="Priority"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                disabled={submitting}
-                options={[
-                  { value: 'low', label: 'Low' },
-                  { value: 'medium', label: 'Medium' },
-                  { value: 'high', label: 'High' },
-                  { value: 'critical', label: 'Critical' },
-                ]}
-              />
-
-              <Select
-                label="Status"
-                value={statusId}
-                onChange={(e) => setStatusId(e.target.value)}
-                disabled={submitting}
-                options={statuses.map((s) => ({
-                  value: s.id,
-                  label: s.name,
-                }))}
-              />
-            </div>
 
             <Select
-              label="Assign To (Optional)"
-              value={assignedTo}
-              onChange={(e) => setAssignedTo(e.target.value)}
+              label="Priority"
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as Priority)}
               disabled={submitting}
-              options={users.map((u) => ({
-                value: u.id,
-                label: u.email,
-              }))}
+              options={[
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'high', label: 'High' },
+                { value: 'critical', label: 'Critical' },
+              ]}
             />
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h3 className="font-medium text-blue-900 mb-2">What happens next?</h3>
+              <ol className="text-sm text-blue-800 list-decimal list-inside space-y-1">
+                <li>NCR will be created as a <strong>Draft</strong></li>
+                <li>You can edit and then <strong>Submit</strong> it</li>
+                <li>It will be routed to <strong>Process Engineer</strong> for review</li>
+                <li>The workflow continues through the approval chain</li>
+              </ol>
+            </div>
 
             <div className="flex gap-4 pt-4">
               <Button
@@ -183,7 +137,7 @@ export default function NewCasePage() {
                 size="md"
                 isLoading={submitting}
               >
-                Create Case
+                Create NCR
               </Button>
               <Link href="/cases">
                 <Button variant="secondary" size="md">

@@ -1,11 +1,11 @@
 import { create } from 'zustand';
-import { AuthUser } from './types';
+import { User, NCR } from './types';
 
 interface AuthState {
-  user: AuthUser | null;
+  user: User | null;
   isLoading: boolean;
   error: string | null;
-  setUser: (user: AuthUser | null) => void;
+  setUser: (user: User | null) => void;
   setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
   clear: () => void;
@@ -21,35 +21,35 @@ export const useAuthStore = create<AuthState>((set) => ({
   clear: () => set({ user: null, isLoading: false, error: null }),
 }));
 
-interface CaseState {
-  cases: any[];
+interface NCRState {
+  ncrs: NCR[];
   isLoading: boolean;
   error: string | null;
-  setCases: (cases: any[]) => void;
+  setNCRs: (ncrs: NCR[]) => void;
   setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
-  addCase: (caseItem: any) => void;
-  updateCase: (caseId: string, updates: any) => void;
-  deleteCase: (caseId: string) => void;
+  addNCR: (ncr: NCR) => void;
+  updateNCR: (ncrId: string, updates: Partial<NCR>) => void;
+  deleteNCR: (ncrId: string) => void;
 }
 
-export const useCaseStore = create<CaseState>((set) => ({
-  cases: [],
+export const useNCRStore = create<NCRState>((set) => ({
+  ncrs: [],
   isLoading: false,
   error: null,
-  setCases: (cases) => set({ cases, error: null }),
+  setNCRs: (ncrs) => set({ ncrs, error: null }),
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
-  addCase: (caseItem) =>
-    set((state) => ({ cases: [caseItem, ...state.cases] })),
-  updateCase: (caseId, updates) =>
+  addNCR: (ncr) =>
+    set((state) => ({ ncrs: [ncr, ...state.ncrs] })),
+  updateNCR: (ncrId, updates) =>
     set((state) => ({
-      cases: state.cases.map((c) =>
-        c.id === caseId ? { ...c, ...updates } : c
+      ncrs: state.ncrs.map((n) =>
+        n.id === ncrId ? { ...n, ...updates } : n
       ),
     })),
-  deleteCase: (caseId) =>
+  deleteNCR: (ncrId) =>
     set((state) => ({
-      cases: state.cases.filter((c) => c.id !== caseId),
+      ncrs: state.ncrs.filter((n) => n.id !== ncrId),
     })),
 }));

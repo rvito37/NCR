@@ -3,35 +3,44 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { useCaseStore } from '@/lib/store';
 import {
-  getCase,
-  getCaseComments,
-  getCaseActivity,
-  addComment,
-  updateCase,
-  canEditCase,
-  getCaseStatuses,
-  getAllUsers,
+  getNCR,
+  getNCRComments,
+  getNCRTransitions,
+  addNCRComment,
+  executeWorkflowAction,
 } from '@/lib/api';
+import {
+  NCR,
+  NCRComment,
+  WorkflowTransition,
+  WorkflowAction,
+  STAGE_INFO,
+  getAvailableActions,
+  getRoleLabel,
+  WorkflowStage,
+  ReworkResult,
+} from '@/lib/types';
 import Link from 'next/link';
 import { Button } from '@/components/Button';
-import { Textarea } from '@/components/FormElements';
+import { Textarea, Select } from '@/components/FormElements';
 
-export default function CaseDetailPage() {
+export default function NCRDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const { user, isLoading, isAuthenticated } = useAuth();
-  const { cases } = useCaseStore();
-  const [caseData, setCaseData] = useState<any>(null);
-  const [comments, setComments] = useState<any[]>([]);
-  const [activity, setActivity] = useState<any[]>([]);
+  const [ncr, setNCR] = useState<NCR | null>(null);
+  const [comments, setComments] = useState<NCRComment[]>([]);
+  const [transitions, setTransitions] = useState<WorkflowTransition[]>([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [canEdit, setCanEdit] = useState(false);
-  const [statuses, setStatuses] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
+  const [actionComment, setActionComment] = useState('');
+  const [selectedAction, setSelectedAction] = useState<WorkflowAction | null>(null);
+  const [reworkResult, setReworkResult] = useState<ReworkResult>('conformal');
+  const [engineeringFindings, setEngineeringFindings] = useState('');
+  const [rootCauseAnalysis, setRootCauseAnalysis] = useState('');
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -41,32 +50,24 @@ export default function CaseDetailPage() {
 
     const loadData = async () => {
       try {
-        const [caseItem, caseComments, caseActivity, caseStatuses, allUsers] =
-          await Promise.all([
-            getCase(params.id),
-            getCaseComments(params.id),
-            getCaseActivity(params.id),
-            getCaseStatuses(),
-            getAllUsers(),
-          ]);
+        const [ncrData, ncrComments, ncrTransitions] = await Promise.all([
+          getNCR(params.id),
+          getNCRComments(params.id),
+          getNCRTransitions(params.id),
+        ]);
 
-        if (!caseItem) {
+        if (!ncrData) {
           router.push('/cases');
           return;
         }
 
-        setCaseData(caseItem);
-        setComments(caseComments);
-        setActivity(caseActivity);
-        setStatuses(caseStatuses);
-        setUsers(allUsers);
-
-        if (user) {
-          const userCanEdit = await canEditCase(caseItem, user.id, user.role);
-          setCanEdit(userCanEdit);
-        }
+        setNCR(ncrData);
+        setComments(ncrComments);
+        setTransitions(ncrTransitions);
+        setEngineeringFindings(ncrData.engineering_findings || '');
+        setRootCauseAnalysis(ncrData.root_cause_analysis || '');
       } catch (error) {
-        console.error('Failed to load case:', error);
+        console.error('Failed to load NCR:', error);
       } finally {
         setLoading(false);
       }
@@ -75,7 +76,7 @@ export default function CaseDetailPage() {
     if (isAuthenticated) {
       loadData();
     }
-  }, [params.id, isAuthenticated, isLoading, router, user]);
+  }, [params.id, isAuthenticated, isLoading, router]);
 
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,9 +84,9 @@ export default function CaseDetailPage() {
 
     setSubmitting(true);
     try {
-      const { data } = await addComment(params.id, user.id, newComment);
+      const { data } = await addNCRComment(params.id, user.id, newComment);
       if (data) {
-        setComments([{ ...data, user }, ...comments]);
+        setComments([{ ...data, user } as NCRComment, ...comments]);
         setNewComment('');
       }
     } catch (error) {
@@ -95,97 +96,248 @@ export default function CaseDetailPage() {
     }
   };
 
-  const handleStatusChange = async (newStatusId: string) => {
-    if (!user) return;
+  const handleWorkflowAction = async (action: WorkflowAction) => {
+    if (!user || !ncr) return;
+
+    setSubmitting(true);
+    setActionError('');
 
     try {
-      await updateCase(params.id, { status_id: newStatusId }, user.id);
-      setCaseData({
-        ...caseData,
-        status_id: newStatusId,
-        status: statuses.find((s) => s.id === newStatusId),
+      const result = await executeWorkflowAction(ncr, user, action, actionComment, {
+        engineeringFindings: engineeringFindings || undefined,
+        rootCauseAnalysis: rootCauseAnalysis || undefined,
+        reworkResult: ncr.workflow_stage === 'rework' ? reworkResult : undefined,
       });
+
+      if (result.success) {
+        // Reload the NCR
+        const updatedNCR = await getNCR(params.id);
+        const updatedTransitions = await getNCRTransitions(params.id);
+        setNCR(updatedNCR);
+        setTransitions(updatedTransitions);
+        setActionComment('');
+        setSelectedAction(null);
+      } else {
+        setActionError(result.error || 'Action failed');
+      }
     } catch (error) {
-      console.error('Failed to update case:', error);
+      setActionError('An error occurred');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleAssignChange = async (newAssignedTo: string | null) => {
-    if (!user) return;
+  if (isLoading || loading || !user) return null;
+  if (!ncr) return null;
 
-    try {
-      await updateCase(params.id, { assigned_to: newAssignedTo }, user.id);
-      setCaseData({
-        ...caseData,
-        assigned_to: newAssignedTo,
-        assigned_user: users.find((u) => u.id === newAssignedTo) || null,
-      });
-    } catch (error) {
-      console.error('Failed to update case:', error);
-    }
+  const availableActions = getAvailableActions(user, ncr);
+  const stageInfo = STAGE_INFO[ncr.workflow_stage as WorkflowStage] || {
+    label: ncr.workflow_stage,
+    color: '#6B7280',
   };
 
-  if (isLoading || loading) return null;
-  if (!caseData) return null;
+  const isPE = user.role === 'process_engineer' || user.role === 'admin';
+  const isRework = ncr.workflow_stage === 'rework';
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <Link href="/cases" className="text-blue-600 hover:text-blue-700 mb-4 inline-block">
-          ← Back to Cases
+          &larr; Back to NCRs
         </Link>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow p-6 mb-6">
-              <h1 className="text-3xl font-bold text-gray-900 mb-4">
-                {caseData.title}
-              </h1>
-              <p className="text-gray-600 mb-6">{caseData.description}</p>
-
-              <div className="grid grid-cols-2 gap-4">
+          {/* Main Content */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* NCR Header */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex justify-between items-start mb-4">
                 <div>
-                  <p className="text-sm text-gray-500 font-medium">Priority</p>
+                  <p className="text-sm text-gray-500 font-mono">{ncr.ncr_number || 'Draft'}</p>
+                  <h1 className="text-3xl font-bold text-gray-900">{ncr.title}</h1>
+                </div>
+                <span
+                  className="px-3 py-1 rounded-full text-sm font-medium"
+                  style={{
+                    backgroundColor: stageInfo.color + '20',
+                    color: stageInfo.color,
+                  }}
+                >
+                  {stageInfo.label}
+                </span>
+              </div>
+              <p className="text-gray-600 mb-6">{ncr.description}</p>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">Priority</p>
                   <p
-                    className={`text-lg font-semibold ${
-                      caseData.priority === 'critical'
+                    className={`font-semibold ${
+                      ncr.priority === 'critical'
                         ? 'text-red-600'
-                        : caseData.priority === 'high'
+                        : ncr.priority === 'high'
                         ? 'text-orange-600'
-                        : caseData.priority === 'medium'
+                        : ncr.priority === 'medium'
                         ? 'text-yellow-600'
                         : 'text-green-600'
                     }`}
                   >
-                    {caseData.priority.toUpperCase()}
+                    {ncr.priority.toUpperCase()}
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500 font-medium">Created</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {new Date(caseData.created_at).toLocaleDateString()}
+                  <p className="text-sm text-gray-500">Batch Decision</p>
+                  <p className="font-semibold text-gray-900 capitalize">
+                    {ncr.batch_decision || 'Pending'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Assigned Role</p>
+                  <p className="font-semibold text-gray-900">
+                    {ncr.assigned_role ? getRoleLabel(ncr.assigned_role) : '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Created</p>
+                  <p className="font-semibold text-gray-900">
+                    {new Date(ncr.created_at).toLocaleDateString()}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow p-6 mb-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">
-                Comments
-              </h2>
+            {/* Engineering Fields (for PE) */}
+            {(isPE || ncr.engineering_findings || ncr.root_cause_analysis) && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4">Engineering Analysis</h2>
+
+                {isPE && ncr.workflow_stage === 'pe_review' ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Engineering Findings
+                      </label>
+                      <Textarea
+                        value={engineeringFindings}
+                        onChange={(e) => setEngineeringFindings(e.target.value)}
+                        placeholder="Enter your engineering findings..."
+                        rows={4}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Root Cause Analysis
+                      </label>
+                      <Textarea
+                        value={rootCauseAnalysis}
+                        onChange={(e) => setRootCauseAnalysis(e.target.value)}
+                        placeholder="Enter root cause analysis..."
+                        rows={4}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {ncr.engineering_findings && (
+                      <div>
+                        <p className="text-sm text-gray-500 font-medium">Engineering Findings</p>
+                        <p className="mt-1 text-gray-900 whitespace-pre-wrap">{ncr.engineering_findings}</p>
+                      </div>
+                    )}
+                    {ncr.root_cause_analysis && (
+                      <div>
+                        <p className="text-sm text-gray-500 font-medium">Root Cause Analysis</p>
+                        <p className="mt-1 text-gray-900 whitespace-pre-wrap">{ncr.root_cause_analysis}</p>
+                      </div>
+                    )}
+                    {!ncr.engineering_findings && !ncr.root_cause_analysis && (
+                      <p className="text-gray-500">No engineering analysis yet</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Rework Section */}
+            {isRework && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                <h2 className="text-xl font-bold text-yellow-800 mb-4">Rework Required</h2>
+                <p className="text-yellow-700 mb-4">
+                  This NCR requires rework. After completing the rework, select the result and submit.
+                </p>
+                <Select
+                  label="Rework Result"
+                  value={reworkResult}
+                  onChange={(e) => setReworkResult(e.target.value as ReworkResult)}
+                  options={[
+                    { value: 'conformal', label: 'Conformal' },
+                    { value: 'partially_conformal', label: 'Partially Conformal' },
+                    { value: 'non_conformal', label: 'Non Conformal' },
+                  ]}
+                />
+              </div>
+            )}
+
+            {/* Workflow Actions */}
+            {availableActions.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                <h2 className="text-xl font-bold text-blue-900 mb-4">Available Actions</h2>
+
+                {actionError && (
+                  <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded text-red-700">
+                    {actionError}
+                  </div>
+                )}
+
+                <div className="mb-4">
+                  <Textarea
+                    placeholder="Add a comment for this action (optional for some actions)..."
+                    value={actionComment}
+                    onChange={(e) => setActionComment(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {availableActions.map((actionRule) => (
+                    <Button
+                      key={actionRule.action}
+                      variant={
+                        ['approve', 'accept_batch', 'submit', 'submit_rework'].includes(actionRule.action)
+                          ? 'primary'
+                          : actionRule.action.includes('reject') || actionRule.action.includes('return')
+                          ? 'danger'
+                          : 'secondary'
+                      }
+                      size="sm"
+                      onClick={() => handleWorkflowAction(actionRule.action)}
+                      isLoading={submitting}
+                      disabled={actionRule.requiresComment && !actionComment.trim()}
+                    >
+                      {actionRule.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Comments */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Comments</h2>
 
               <form onSubmit={handleAddComment} className="mb-6">
                 <Textarea
                   placeholder="Add a comment..."
                   value={newComment}
                   onChange={(e) => setNewComment(e.target.value)}
-                  className="mb-3"
+                  rows={3}
                   disabled={submitting}
                 />
                 <Button
                   type="submit"
                   variant="primary"
                   size="sm"
+                  className="mt-2"
                   isLoading={submitting}
                   disabled={!newComment.trim()}
                 >
@@ -197,11 +349,20 @@ export default function CaseDetailPage() {
                 {comments.length > 0 ? (
                   comments.map((comment) => (
                     <div key={comment.id} className="border-l-4 border-blue-500 pl-4">
-                      <p className="text-sm text-gray-500">
-                        {comment.user?.email} on{' '}
-                        {new Date(comment.created_at).toLocaleDateString()}
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900">
+                          {comment.user?.display_name || comment.user?.email}
+                        </p>
+                        {comment.comment_type !== 'general' && (
+                          <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">
+                            {comment.comment_type.replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {new Date(comment.created_at).toLocaleString()}
                       </p>
-                      <p className="text-gray-900 mt-1">{comment.content}</p>
+                      <p className="text-gray-700 mt-1">{comment.content}</p>
                     </div>
                   ))
                 ) : (
@@ -210,100 +371,125 @@ export default function CaseDetailPage() {
               </div>
             </div>
 
+            {/* Workflow History */}
             <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">
-                Activity Log
-              </h2>
-              <div className="space-y-3">
-                {activity.length > 0 ? (
-                  activity.map((log) => (
-                    <div key={log.id} className="border-l-4 border-gray-300 pl-4">
-                      <p className="text-sm text-gray-500">
-                        {log.user?.email} - {log.action}
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Workflow History</h2>
+              <div className="space-y-4">
+                {transitions.length > 0 ? (
+                  transitions.map((transition) => (
+                    <div key={transition.id} className="border-l-4 border-gray-300 pl-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900 capitalize">
+                          {transition.action.replace(/_/g, ' ')}
+                        </span>
+                        <span className="text-gray-500">&rarr;</span>
+                        <span
+                          className="px-2 py-0.5 rounded text-xs font-medium"
+                          style={{
+                            backgroundColor:
+                              (STAGE_INFO[transition.to_stage as WorkflowStage]?.color || '#6B7280') + '20',
+                            color: STAGE_INFO[transition.to_stage as WorkflowStage]?.color || '#6B7280',
+                          }}
+                        >
+                          {STAGE_INFO[transition.to_stage as WorkflowStage]?.label || transition.to_stage}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {transition.from_user?.display_name || transition.from_user?.email || 'System'} -{' '}
+                        {new Date(transition.created_at).toLocaleString()}
                       </p>
-                      <p className="text-gray-600 text-sm mt-1">
-                        {log.description}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {new Date(log.timestamp).toLocaleString()}
-                      </p>
+                      {transition.comments && (
+                        <p className="text-sm text-gray-600 mt-1">{transition.comments}</p>
+                      )}
                     </div>
                   ))
                 ) : (
-                  <p className="text-gray-500">No activity yet</p>
+                  <p className="text-gray-500">No workflow history yet</p>
                 )}
               </div>
             </div>
           </div>
 
+          {/* Sidebar */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-lg shadow p-6 sticky top-8">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Details</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">NCR Details</h3>
 
               <div className="space-y-4">
                 <div>
-                  <p className="text-sm text-gray-500 font-medium">Status</p>
-                  {canEdit ? (
-                    <select
-                      value={caseData.status_id}
-                      onChange={(e) => handleStatusChange(e.target.value)}
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-black"
-                    >
-                      {statuses.map((status) => (
-                        <option key={status.id} value={status.id}>
-                          {status.name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <p className="mt-1 font-medium text-gray-900">
-                      {caseData.status?.name}
-                    </p>
-                  )}
+                  <p className="text-sm text-gray-500">Status</p>
+                  <p className="font-medium text-gray-900 capitalize">{ncr.final_status}</p>
                 </div>
 
                 <div>
-                  <p className="text-sm text-gray-500 font-medium">Assigned To</p>
-                  {canEdit ? (
-                    <select
-                      value={caseData.assigned_to || ''}
-                      onChange={(e) =>
-                        handleAssignChange(e.target.value || null)
-                      }
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-black"
-                    >
-                      <option value="">Unassigned</option>
-                      {users.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.email}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <p className="mt-1 font-medium text-gray-900">
-                      {caseData.assigned_user?.email || 'Unassigned'}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <p className="text-sm text-gray-500 font-medium">Created By</p>
-                  <p className="mt-1 font-medium text-gray-900">
-                    {caseData.created_user?.email}
+                  <p className="text-sm text-gray-500">Current Stage</p>
+                  <p
+                    className="font-medium"
+                    style={{ color: stageInfo.color }}
+                  >
+                    {stageInfo.label}
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-sm text-gray-500 font-medium">Created At</p>
-                  <p className="mt-1 font-medium text-gray-900">
-                    {new Date(caseData.created_at).toLocaleString()}
+                  <p className="text-sm text-gray-500">Assigned Role</p>
+                  <p className="font-medium text-gray-900">
+                    {ncr.assigned_role ? getRoleLabel(ncr.assigned_role) : 'Unassigned'}
+                  </p>
+                </div>
+
+                <hr className="border-gray-200" />
+
+                <div>
+                  <p className="text-sm text-gray-500 mb-2">Approvals</p>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span>Process Engineer</span>
+                      <span className={ncr.pe_approved ? 'text-green-600' : 'text-gray-400'}>
+                        {ncr.pe_approved ? 'Approved' : 'Pending'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Engineering Manager</span>
+                      <span className={ncr.em_approved ? 'text-green-600' : 'text-gray-400'}>
+                        {ncr.em_approved ? 'Approved' : 'Pending'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Operations Manager</span>
+                      <span className={ncr.om_approved ? 'text-green-600' : 'text-gray-400'}>
+                        {ncr.om_approved ? 'Approved' : 'Pending'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>QA Manager</span>
+                      <span className={ncr.qa_approved ? 'text-green-600' : 'text-gray-400'}>
+                        {ncr.qa_approved ? 'Approved' : 'Pending'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <hr className="border-gray-200" />
+
+                <div>
+                  <p className="text-sm text-gray-500">Created By</p>
+                  <p className="font-medium text-gray-900">
+                    {ncr.created_user?.display_name || ncr.created_user?.email}
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-sm text-gray-500 font-medium">Updated At</p>
-                  <p className="mt-1 font-medium text-gray-900">
-                    {new Date(caseData.updated_at).toLocaleString()}
+                  <p className="text-sm text-gray-500">Created At</p>
+                  <p className="font-medium text-gray-900">
+                    {new Date(ncr.created_at).toLocaleString()}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-sm text-gray-500">Updated At</p>
+                  <p className="font-medium text-gray-900">
+                    {new Date(ncr.updated_at).toLocaleString()}
                   </p>
                 </div>
               </div>

@@ -1,9 +1,23 @@
 import { supabase } from './supabase';
-import { AuthUser, Case, CaseComment, CaseActivity, CaseStatus, ROLE_PERMISSIONS, UserRole } from './types';
+import {
+  User,
+  UserRole,
+  NCR,
+  NCRComment,
+  WorkflowTransition,
+  WorkflowStage,
+  WorkflowAction,
+  Priority,
+  BatchDecision,
+  ReworkResult,
+  CommentType,
+  WORKFLOW_TRANSITIONS,
+  canUserActOnNCR,
+} from './types';
 
 // ============== Authentication ==============
 
-export async function getCurrentUser() {
+export async function getCurrentUser(): Promise<User | null> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -16,14 +30,14 @@ export async function getCurrentUser() {
     .eq('id', user.id)
     .single();
 
-  return data as AuthUser | null;
+  return data as User | null;
 }
 
 export async function signIn(email: string, password: string) {
   return supabase.auth.signInWithPassword({ email, password });
 }
 
-export async function signUp(email: string, password: string, displayName: string) {
+export async function signUp(email: string, password: string, displayName: string, role: UserRole = 'station_supervisor') {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -36,7 +50,7 @@ export async function signUp(email: string, password: string, displayName: strin
       id: data.user.id,
       email: data.user.email,
       display_name: displayName,
-      role: 'viewer',
+      role,
     });
 
     if (insertError) return { data: null, error: insertError };
@@ -51,67 +65,82 @@ export async function signOut() {
 
 // ============== Users ==============
 
-export async function getUser(userId: string) {
+export async function getUser(userId: string): Promise<User | null> {
   const { data } = await supabase
     .from('users')
     .select('*')
     .eq('id', userId)
     .single();
 
-  return data as AuthUser | null;
+  return data as User | null;
 }
 
 export async function updateUserRole(userId: string, role: UserRole) {
   return supabase.from('users').update({ role }).eq('id', userId);
 }
 
-export async function getAllUsers() {
+export async function getAllUsers(): Promise<User[]> {
   const { data } = await supabase
     .from('users')
     .select('*')
     .order('created_at', { ascending: false });
 
-  return (data as AuthUser[]) || [];
+  return (data as User[]) || [];
 }
 
-// ============== Cases ==============
-
-export async function getCase(caseId: string) {
+export async function getUsersByRole(role: UserRole): Promise<User[]> {
   const { data } = await supabase
-    .from('cases')
+    .from('users')
+    .select('*')
+    .eq('role', role)
+    .eq('is_active', true);
+
+  return (data as User[]) || [];
+}
+
+// ============== NCR ==============
+
+export async function getNCR(ncrId: string): Promise<NCR | null> {
+  const { data } = await supabase
+    .from('ncr')
     .select(`
       *,
-      status:status_id (id, name, color, order),
-      assigned_user:assigned_to (id, email, display_name),
-      created_user:created_by (id, email, display_name)
+      assigned_user:assigned_to (id, email, display_name, role),
+      created_user:created_by (id, email, display_name, role)
     `)
-    .eq('id', caseId)
+    .eq('id', ncrId)
     .single();
 
-  return data as Case | null;
+  return data as NCR | null;
 }
 
-export async function getCases(filters?: {
-  status_id?: string;
+export async function getNCRs(filters?: {
+  workflow_stage?: WorkflowStage;
   assigned_to?: string;
-  priority?: string;
+  assigned_role?: UserRole;
+  priority?: Priority;
   created_by?: string;
-}) {
+  final_status?: string;
+  batch_decision?: BatchDecision;
+}): Promise<NCR[]> {
   let query = supabase
-    .from('cases')
+    .from('ncr')
     .select(`
       *,
-      status:status_id (id, name, color, order),
-      assigned_user:assigned_to (id, email, display_name),
-      created_user:created_by (id, email, display_name)
+      assigned_user:assigned_to (id, email, display_name, role),
+      created_user:created_by (id, email, display_name, role)
     `);
 
-  if (filters?.status_id) {
-    query = query.eq('status_id', filters.status_id);
+  if (filters?.workflow_stage) {
+    query = query.eq('workflow_stage', filters.workflow_stage);
   }
 
   if (filters?.assigned_to) {
     query = query.eq('assigned_to', filters.assigned_to);
+  }
+
+  if (filters?.assigned_role) {
+    query = query.eq('assigned_role', filters.assigned_role);
   }
 
   if (filters?.priority) {
@@ -122,213 +151,319 @@ export async function getCases(filters?: {
     query = query.eq('created_by', filters.created_by);
   }
 
+  if (filters?.final_status) {
+    query = query.eq('final_status', filters.final_status);
+  }
+
+  if (filters?.batch_decision) {
+    query = query.eq('batch_decision', filters.batch_decision);
+  }
+
   const { data } = await query.order('created_at', { ascending: false });
 
-  return (data as Case[]) || [];
+  return (data as NCR[]) || [];
 }
 
-export async function createCase(
+export async function getMyNCRs(user: User): Promise<NCR[]> {
+  // Get NCRs assigned to user or their role
+  const { data } = await supabase
+    .from('ncr')
+    .select(`
+      *,
+      assigned_user:assigned_to (id, email, display_name, role),
+      created_user:created_by (id, email, display_name, role)
+    `)
+    .or(`assigned_to.eq.${user.id},assigned_role.eq.${user.role},created_by.eq.${user.id}`)
+    .order('created_at', { ascending: false });
+
+  return (data as NCR[]) || [];
+}
+
+export async function createNCR(
   title: string,
   description: string,
-  priority: 'low' | 'medium' | 'high' | 'critical',
-  statusId: string,
-  createdBy: string,
-  assignedTo?: string
-) {
+  priority: Priority,
+  createdBy: string
+): Promise<{ data: NCR | null; error: Error | null }> {
   const { data, error } = await supabase
-    .from('cases')
+    .from('ncr')
     .insert({
       title,
       description,
       priority,
-      status_id: statusId,
       created_by: createdBy,
-      assigned_to: assignedTo || null,
+      workflow_stage: 'draft',
+      assigned_role: 'station_supervisor',
+      assigned_to: createdBy,
     })
     .select()
     .single();
 
-  if (!error) {
-    await logCaseActivity(
+  if (!error && data) {
+    await createWorkflowTransition(
       data.id,
-      createdBy,
-      'created',
-      `Case "${title}" was created`
+      null,
+      'draft',
+      null,
+      null,
+      'station_supervisor',
+      'save_draft',
+      null,
+      'NCR created'
     );
   }
 
-  return { data, error };
+  return { data: data as NCR | null, error: error as Error | null };
 }
 
-export async function updateCase(
-  caseId: string,
-  updates: Partial<Case>,
+export async function updateNCR(
+  ncrId: string,
+  updates: Partial<NCR>,
   userId: string
-) {
+): Promise<{ data: NCR | null; error: Error | null }> {
   const { data, error } = await supabase
-    .from('cases')
+    .from('ncr')
     .update({
       ...updates,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', caseId)
+    .eq('id', ncrId)
     .select()
     .single();
 
-  if (!error) {
-    const changedFields = Object.keys(updates).join(', ');
-    await logCaseActivity(
-      caseId,
-      userId,
-      'updated',
-      `Updated fields: ${changedFields}`
-    );
+  return { data: data as NCR | null, error: error as Error | null };
+}
+
+export async function deleteNCR(ncrId: string): Promise<{ error: Error | null }> {
+  const { error } = await supabase.from('ncr').delete().eq('id', ncrId);
+  return { error: error as Error | null };
+}
+
+// ============== Workflow Actions ==============
+
+export async function executeWorkflowAction(
+  ncr: NCR,
+  user: User,
+  action: WorkflowAction,
+  comments?: string,
+  additionalData?: {
+    batchDecision?: BatchDecision;
+    engineeringFindings?: string;
+    rootCauseAnalysis?: string;
+    reworkResult?: ReworkResult;
+    reworkNotes?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  // Find the transition rule
+  const transitions = WORKFLOW_TRANSITIONS[ncr.workflow_stage];
+  const transitionRule = transitions?.find(t => t.action === action);
+
+  if (!transitionRule) {
+    return { success: false, error: 'Invalid action for current stage' };
   }
 
-  return { data, error };
-}
-
-export async function deleteCase(caseId: string, userId: string) {
-  const { error } = await supabase.from('cases').delete().eq('id', caseId);
-
-  if (!error) {
-    await logCaseActivity(
-      caseId,
-      userId,
-      'deleted',
-      'Case was deleted'
-    );
+  // Check if user can perform this action
+  if (!canUserActOnNCR(user, ncr)) {
+    return { success: false, error: 'You do not have permission to perform this action' };
   }
 
-  return { error };
+  // Check if comment is required
+  if (transitionRule.requiresComment && !comments) {
+    return { success: false, error: 'Comment is required for this action' };
+  }
+
+  // Prepare update data
+  const updateData: Partial<NCR> = {
+    workflow_stage: transitionRule.nextStage,
+    assigned_role: transitionRule.nextRole,
+    assigned_to: null, // Will be assigned to role, not specific user
+  };
+
+  // Handle batch decision actions
+  if (['accept_batch', 'partially_accept', 'reject_batch', 'request_rework'].includes(action)) {
+    updateData.batch_decision = action === 'accept_batch' ? 'accept' :
+      action === 'partially_accept' ? 'partially_accept' :
+      action === 'reject_batch' ? 'reject' : 'rework';
+  }
+
+  // Handle approval flags
+  if (action === 'approve') {
+    switch (ncr.workflow_stage) {
+      case 'pe_review':
+        updateData.pe_approved = true;
+        break;
+      case 'em_review':
+        updateData.em_approved = true;
+        break;
+      case 'pm_review':
+        updateData.pm_approved = true;
+        break;
+      case 'om_review':
+        updateData.om_approved = true;
+        break;
+      case 'qa_review':
+        updateData.qa_approved = true;
+        if (transitionRule.nextStage === 'approved') {
+          updateData.final_status = 'approved';
+        }
+        break;
+      case 'marketing_review':
+        updateData.marketing_approved = true;
+        break;
+    }
+  }
+
+  // Handle additional data from Process Engineer
+  if (additionalData?.engineeringFindings) {
+    updateData.engineering_findings = additionalData.engineeringFindings;
+  }
+  if (additionalData?.rootCauseAnalysis) {
+    updateData.root_cause_analysis = additionalData.rootCauseAnalysis;
+  }
+  if (additionalData?.reworkResult) {
+    updateData.rework_result = additionalData.reworkResult;
+  }
+  if (additionalData?.reworkNotes) {
+    updateData.rework_notes = additionalData.reworkNotes;
+  }
+
+  // Execute the update
+  const { error } = await updateNCR(ncr.id, updateData, user.id);
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  // Log the transition
+  await createWorkflowTransition(
+    ncr.id,
+    ncr.workflow_stage,
+    transitionRule.nextStage,
+    user.id,
+    null,
+    transitionRule.nextRole,
+    action,
+    additionalData?.batchDecision || null,
+    comments || null
+  );
+
+  return { success: true };
 }
 
-// ============== Case Status ==============
+// ============== Workflow Transitions ==============
 
-export async function getCaseStatuses() {
-  const { data } = await supabase
-    .from('case_statuses')
-    .select('*')
-    .order('order', { ascending: true });
-
-  return (data as CaseStatus[]) || [];
+export async function createWorkflowTransition(
+  ncrId: string,
+  fromStage: WorkflowStage | null,
+  toStage: WorkflowStage,
+  fromUserId: string | null,
+  toUserId: string | null,
+  toRole: UserRole | null,
+  action: WorkflowAction | string,
+  decision: string | null,
+  comments: string | null
+) {
+  return supabase.from('workflow_transitions').insert({
+    ncr_id: ncrId,
+    from_stage: fromStage,
+    to_stage: toStage,
+    from_user_id: fromUserId,
+    to_user_id: toUserId,
+    to_role: toRole,
+    action,
+    decision,
+    comments,
+  });
 }
 
-export async function getDefaultStatus() {
+export async function getNCRTransitions(ncrId: string): Promise<WorkflowTransition[]> {
   const { data } = await supabase
-    .from('case_statuses')
-    .select('*')
-    .order('order', { ascending: true })
-    .limit(1)
-    .single();
+    .from('workflow_transitions')
+    .select(`
+      *,
+      from_user:from_user_id (id, email, display_name, role),
+      to_user:to_user_id (id, email, display_name, role)
+    `)
+    .eq('ncr_id', ncrId)
+    .order('created_at', { ascending: false });
 
-  return data as CaseStatus | null;
+  return (data as WorkflowTransition[]) || [];
 }
 
 // ============== Comments ==============
 
-export async function getCaseComments(caseId: string) {
+export async function getNCRComments(ncrId: string): Promise<NCRComment[]> {
   const { data } = await supabase
-    .from('case_comments')
+    .from('ncr_comments')
     .select(`
       *,
-      user:user_id (id, email, display_name)
+      user:user_id (id, email, display_name, role)
     `)
-    .eq('case_id', caseId)
+    .eq('ncr_id', ncrId)
     .order('created_at', { ascending: false });
 
-  return (data as CaseComment[]) || [];
+  return (data as NCRComment[]) || [];
 }
 
-export async function addComment(
-  caseId: string,
+export async function addNCRComment(
+  ncrId: string,
   userId: string,
-  content: string
-) {
+  content: string,
+  commentType: CommentType = 'general'
+): Promise<{ data: NCRComment | null; error: Error | null }> {
   const { data, error } = await supabase
-    .from('case_comments')
+    .from('ncr_comments')
     .insert({
-      case_id: caseId,
+      ncr_id: ncrId,
       user_id: userId,
       content,
+      comment_type: commentType,
     })
     .select()
     .single();
 
-  if (!error) {
-    await logCaseActivity(
-      caseId,
-      userId,
-      'commented',
-      'Added a comment'
-    );
-  }
-
-  return { data, error };
+  return { data: data as NCRComment | null, error: error as Error | null };
 }
 
-// ============== Activity Log ==============
+// ============== Dashboard Stats ==============
 
-export async function getCaseActivity(caseId: string) {
-  const { data } = await supabase
-    .from('case_activity')
-    .select(`
-      *,
-      user:user_id (id, email, display_name)
-    `)
-    .eq('case_id', caseId)
-    .order('timestamp', { ascending: false });
+export async function getDashboardStats(user: User): Promise<{
+  total: number;
+  myPending: number;
+  approved: number;
+  rejected: number;
+  inRework: number;
+  byStage: Record<WorkflowStage, number>;
+}> {
+  // Get all NCRs for stats
+  const allNCRs = await getNCRs();
+  const myNCRs = await getMyNCRs(user);
 
-  return (data as CaseActivity[]) || [];
-}
-
-export async function logCaseActivity(
-  caseId: string,
-  userId: string,
-  action: string,
-  description: string
-) {
-  return supabase.from('case_activity').insert({
-    case_id: caseId,
-    user_id: userId,
-    action,
-    description,
+  const byStage: Record<string, number> = {};
+  allNCRs.forEach(ncr => {
+    byStage[ncr.workflow_stage] = (byStage[ncr.workflow_stage] || 0) + 1;
   });
+
+  return {
+    total: allNCRs.length,
+    myPending: myNCRs.filter(n => n.final_status === 'in_progress').length,
+    approved: allNCRs.filter(n => n.final_status === 'approved').length,
+    rejected: allNCRs.filter(n => n.final_status === 'rejected').length,
+    inRework: allNCRs.filter(n => n.workflow_stage === 'rework').length,
+    byStage: byStage as Record<WorkflowStage, number>,
+  };
 }
 
-// ============== Authorization ==============
+// ============== Authorization Helpers ==============
 
-export async function checkPermission(userRole: UserRole, permission: string): Promise<boolean> {
-  return ROLE_PERMISSIONS[userRole]?.includes(permission) || false;
+export function canCreateNCR(userRole: UserRole): boolean {
+  return ['station_supervisor', 'admin'].includes(userRole);
 }
 
-export async function canEditCase(case_: Case, userId: string, userRole: UserRole): Promise<boolean> {
-  if (userRole === 'admin') return true;
-  if (!checkPermission(userRole, 'edit_all_cases') && !checkPermission(userRole, 'edit_assigned_cases')) {
-    return false;
-  }
-
-  // Managers can edit their assigned cases
-  if (userRole === 'manager' && case_.assigned_to === userId) {
-    return true;
-  }
-
-  // Analysts can edit their own cases
-  if (userRole === 'analyst' && case_.created_by === userId) {
-    return true;
-  }
-
-  return false;
+export function canDeleteNCR(userRole: UserRole): boolean {
+  return userRole === 'admin';
 }
 
-export async function canDeleteCase(userId: string, userRole: UserRole): Promise<boolean> {
-  return userRole === 'admin' && await checkPermission(userRole, 'delete_case');
-}
-
-export async function canAssignCase(userRole: UserRole): Promise<boolean> {
-  return await checkPermission(userRole, 'assign_case');
-}
-
-export async function canViewAllCases(userRole: UserRole): Promise<boolean> {
-  return await checkPermission(userRole, 'view_all_cases');
+export function canViewAllNCRs(userRole: UserRole): boolean {
+  return ['admin', 'qa_manager', 'operations_manager', 'production_control'].includes(userRole);
 }
