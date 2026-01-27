@@ -37,26 +37,19 @@ export async function signIn(email: string, password: string) {
   return supabase.auth.signInWithPassword({ email, password });
 }
 
-export async function signUp(email: string, password: string, displayName: string, role: UserRole = 'station_supervisor') {
+export async function signUp(email: string, password: string, displayName: string) {
+  // Триггер в Supabase автоматически создаёт профиль в public.users
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
+    options: {
+      data: {
+        display_name: displayName,
+      },
+    },
   });
 
-  if (error) return { data: null, error };
-
-  if (data.user) {
-    const { error: insertError } = await supabase.from('users').insert({
-      id: data.user.id,
-      email: data.user.email,
-      display_name: displayName,
-      role,
-    });
-
-    if (insertError) return { data: null, error: insertError };
-  }
-
-  return { data, error: null };
+  return { data, error };
 }
 
 export async function signOut() {
