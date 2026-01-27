@@ -13,7 +13,7 @@ export function Navigation() {
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center gap-8">
             <Link href="/" className="text-2xl font-bold text-blue-600">
-              CMS
+              NCR Jerusalem
             </Link>
             {isAuthenticated && (
               <div className="hidden md:flex gap-6">
