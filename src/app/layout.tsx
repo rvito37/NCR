@@ -1,20 +1,9 @@
 'use client';
 
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { Navigation } from "@/components/Navigation";
 import { useAuth } from "@/lib/auth-context";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 function LayoutContent({
   children,
@@ -67,9 +56,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className="antialiased font-sans">
         <AuthProvider>
           <LayoutContent>{children}</LayoutContent>
         </AuthProvider>
