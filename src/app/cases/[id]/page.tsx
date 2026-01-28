@@ -445,25 +445,25 @@ export default function NCRDetailPage() {
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span>Process Engineer</span>
-                      <span className={ncr.pe_approved ? 'text-green-600' : 'text-gray-400'}>
+                      <span className={ncr.pe_approved ? 'text-green-600 font-medium' : 'text-red-500'}>
                         {ncr.pe_approved ? 'Approved' : 'Pending'}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>Engineering Manager</span>
-                      <span className={ncr.em_approved ? 'text-green-600' : 'text-gray-400'}>
+                      <span className={ncr.em_approved ? 'text-green-600 font-medium' : 'text-red-500'}>
                         {ncr.em_approved ? 'Approved' : 'Pending'}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>Operations Manager</span>
-                      <span className={ncr.om_approved ? 'text-green-600' : 'text-gray-400'}>
+                      <span className={ncr.om_approved ? 'text-green-600 font-medium' : 'text-red-500'}>
                         {ncr.om_approved ? 'Approved' : 'Pending'}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>QA Manager</span>
-                      <span className={ncr.qa_approved ? 'text-green-600' : 'text-gray-400'}>
+                      <span className={ncr.qa_approved ? 'text-green-600 font-medium' : 'text-red-500'}>
                         {ncr.qa_approved ? 'Approved' : 'Pending'}
                       </span>
                     </div>
