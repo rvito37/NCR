@@ -277,6 +277,11 @@ export async function executeWorkflowAction(
     updateData.batch_decision = action === 'accept_batch' ? 'accept' :
       action === 'partially_accept' ? 'partially_accept' :
       action === 'reject_batch' ? 'reject' : 'rework';
+
+    // PE approval is granted when PE makes a batch decision (accept/partially_accept)
+    if (ncr.workflow_stage === 'pe_review' && ['accept_batch', 'partially_accept'].includes(action)) {
+      updateData.pe_approved = true;
+    }
   }
 
   // Handle approval flags
